@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -46,7 +46,7 @@ class PipelineSpec(BaseModel):
     name: str = ""
     repo_url: str = ""
     goal: str = ""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     analysis: RepoAnalysis
     stages: list[Stage]
     work_dir: str = ""

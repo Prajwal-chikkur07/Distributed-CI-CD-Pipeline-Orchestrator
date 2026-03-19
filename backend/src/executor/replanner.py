@@ -1,5 +1,6 @@
 import json
 import logging
+from typing import Awaitable, Callable
 
 from huggingface_hub import InferenceClient
 
@@ -114,9 +115,21 @@ async def execute_recovery(
     scheduler: DAGScheduler,
     agents: dict,
     working_dir: str = ".",
+    use_docker: bool = False,
+    language: str = "",
+    on_update: Callable[[dict], Awaitable[None]] | None = None,
 ) -> StageResult | None:
-    """Execute a recovery plan and return the result if retried."""
+    """Execute a recovery plan and return the result if retried.
+
+    Supports Docker execution, broadcasts step-by-step progress via on_update,
+    and handles all four recovery strategies.
+    """
+    from src.executor.docker_runner import run_in_docker
     from src.models.messages import StageRequest
+
+    async def _broadcast(data: dict) -> None:
+        if on_update:
+            await on_update(data)
 
     if plan.strategy == RecoveryStrategy.FIX_AND_RETRY:
         if not plan.modified_command:
@@ -125,6 +138,34 @@ async def execute_recovery(
             return None
 
         logger.info("Retrying stage %s with modified command: %s", stage.id, plan.modified_command)
+
+        # Broadcast that we're applying the fix
+        await _broadcast({
+            "stage_id": stage.id,
+            "status": "running",
+            "log_type": "recovery_applying",
+            "log_message": f"Applying fix for '{stage.id}': {plan.modified_command[:120]}",
+        })
+
+        # Docker execution path
+        if use_docker:
+            result = await run_in_docker(
+                command=plan.modified_command,
+                work_dir=working_dir,
+                language=language,
+                timeout=stage.timeout_seconds,
+                env_vars=stage.env_vars or None,
+            )
+            result.stage_id = stage.id
+            # Fall back to local if Docker not available
+            if not (result.status == StageStatus.FAILED and "Docker not installed" in result.stderr):
+                scheduler.mark_complete(stage.id, result.status, result)
+                if result.status == StageStatus.FAILED:
+                    scheduler.skip_dependents(stage.id)
+                return result
+            logger.warning("Docker unavailable for recovery, falling back to local execution")
+
+        # Local execution path
         agent = agents.get(stage.agent)
         if not agent:
             logger.error("No agent found for type %s", stage.agent)
@@ -151,12 +192,37 @@ async def execute_recovery(
             stdout=f"Skipped: {plan.reason}",
         )
         scheduler.mark_complete(stage.id, StageStatus.SKIPPED, skip_result)
+
+        await _broadcast({
+            "stage_id": stage.id,
+            "status": "skipped",
+            "log_type": "stage_skipped",
+            "log_message": f"Stage '{stage.id}' skipped by AI replanner: {plan.reason}",
+        })
         return skip_result
 
     elif plan.strategy == RecoveryStrategy.ROLLBACK:
-        logger.info("Rolling back stage %s with %d steps", stage.id, len(plan.rollback_steps))
-        for step in plan.rollback_steps:
-            logger.info("Rollback step: %s", step)
+        total_steps = len(plan.rollback_steps)
+        logger.info("Rolling back stage %s with %d steps", stage.id, total_steps)
+
+        await _broadcast({
+            "stage_id": stage.id,
+            "status": "running",
+            "log_type": "rollback_step",
+            "log_message": f"Rolling back '{stage.id}': executing {total_steps} rollback steps",
+        })
+
+        for i, step in enumerate(plan.rollback_steps):
+            step_num = i + 1
+            logger.info("Rollback step %d/%d: %s", step_num, total_steps, step)
+
+            await _broadcast({
+                "stage_id": stage.id,
+                "status": "running",
+                "log_type": "rollback_step",
+                "log_message": f"Rollback step {step_num}/{total_steps}: {step[:100]}",
+            })
+
             agent = agents.get(stage.agent)
             if agent:
                 request = StageRequest(
@@ -166,10 +232,25 @@ async def execute_recovery(
                     timeout=120,
                 )
                 await agent.execute(request)
+
         scheduler.skip_dependents(stage.id)
+
+        await _broadcast({
+            "stage_id": stage.id,
+            "status": "failed",
+            "log_type": "recovery_failed",
+            "log_message": f"Rollback complete for '{stage.id}' ({total_steps} steps executed). Stage failed, dependents skipped.",
+        })
         return None
 
     else:  # ABORT
         logger.error("Aborting pipeline: %s", plan.reason)
         scheduler.skip_dependents(stage.id)
+
+        await _broadcast({
+            "stage_id": stage.id,
+            "status": "failed",
+            "log_type": "recovery_failed",
+            "log_message": f"Pipeline aborted: {plan.reason}",
+        })
         return None

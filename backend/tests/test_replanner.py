@@ -8,6 +8,12 @@ from src.models.messages import RecoveryStrategy, StageResult, StageStatus
 from src.models.pipeline import AgentType, PipelineSpec, RepoAnalysis, Stage
 
 
+@pytest.fixture(autouse=True)
+def mock_hf_key():
+    with patch("src.executor.replanner.settings.hf_api_key", "dummy_key"):
+        yield
+
+
 def _make_spec() -> PipelineSpec:
     return PipelineSpec(
         repo_url="https://github.com/test/repo",
@@ -30,18 +36,22 @@ def _make_failed_result(stage_id: str = "build") -> StageResult:
     )
 
 
-def _mock_gemini_response(text: str) -> AsyncMock:
-    """Create a mock Gemini API response."""
+def _mock_hf_response(text: str) -> MagicMock:
+    """Create a mock Hugging Face Inference API response."""
+    mock_message = MagicMock()
+    mock_message.content = text
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
     mock_response = MagicMock()
-    mock_response.text = text
+    mock_response.choices = [mock_choice]
     return mock_response
 
 
-def _mock_gemini_client(response_text: str):
-    """Create a patched Gemini client that returns the given response text."""
-    mock_response = _mock_gemini_response(response_text)
+def _mock_hf_client(response_text: str):
+    """Create a patched InferenceClient that returns the given response text."""
+    mock_response = _mock_hf_response(response_text)
     mock_client = MagicMock()
-    mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+    mock_client.chat.completions.create = MagicMock(return_value=mock_response)
     return mock_client
 
 
@@ -58,8 +68,8 @@ class TestAnalyzeFailure:
             "modified_command": "pip install missing_dep && pip install .",
         }
 
-        with patch("src.executor.replanner.genai.Client") as mock_cls:
-            mock_cls.return_value = _mock_gemini_client(json.dumps(response_data))
+        with patch("src.executor.replanner.InferenceClient") as mock_cls:
+            mock_cls.return_value = _mock_hf_client(json.dumps(response_data))
             plan = await analyze_failure(stage, result, spec)
 
         assert plan.strategy == RecoveryStrategy.FIX_AND_RETRY
@@ -72,8 +82,8 @@ class TestAnalyzeFailure:
         result = _make_failed_result()
         spec = _make_spec()
 
-        with patch("src.executor.replanner.genai.Client") as mock_cls:
-            mock_cls.return_value = _mock_gemini_client("This is not valid JSON at all")
+        with patch("src.executor.replanner.InferenceClient") as mock_cls:
+            mock_cls.return_value = _mock_hf_client("This is not valid JSON at all")
             plan = await analyze_failure(stage, result, spec)
 
         assert plan.strategy == RecoveryStrategy.ABORT
@@ -95,8 +105,8 @@ class TestAnalyzeFailure:
             "reason": "Lint failures are non-critical",
         }
 
-        with patch("src.executor.replanner.genai.Client") as mock_cls:
-            mock_cls.return_value = _mock_gemini_client(json.dumps(response_data))
+        with patch("src.executor.replanner.InferenceClient") as mock_cls:
+            mock_cls.return_value = _mock_hf_client(json.dumps(response_data))
             plan = await analyze_failure(stage, result, spec)
 
         assert plan.strategy == RecoveryStrategy.SKIP_STAGE
@@ -113,8 +123,8 @@ class TestAnalyzeFailure:
             "rollback_steps": ["kubectl rollout undo deployment/app"],
         }
 
-        with patch("src.executor.replanner.genai.Client") as mock_cls:
-            mock_cls.return_value = _mock_gemini_client(json.dumps(response_data))
+        with patch("src.executor.replanner.InferenceClient") as mock_cls:
+            mock_cls.return_value = _mock_hf_client(json.dumps(response_data))
             plan = await analyze_failure(stage, result, spec)
 
         assert plan.strategy == RecoveryStrategy.ROLLBACK

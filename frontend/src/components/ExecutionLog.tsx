@@ -12,6 +12,8 @@ import {
   ChevronDown,
   ChevronUp,
   ScrollText,
+  Hammer,
+  Undo2,
 } from 'lucide-react';
 import { usePipelineContext } from '../context/PipelineContext';
 import type { LogEntry, LogType } from '../types/pipeline';
@@ -29,8 +31,10 @@ const logConfig: Record<
   retry: { icon: RotateCcw, color: '#f59e0b', bg: '#fffbeb', label: 'Retry' },
   recovery_start: { icon: Wrench, color: '#8b5cf6', bg: '#f5f3ff', label: 'Healing' },
   recovery_plan: { icon: Zap, color: '#8b5cf6', bg: '#f5f3ff', label: 'Plan' },
+  recovery_applying: { icon: Hammer, color: '#d97706', bg: '#fffbeb', label: 'Fixing' },
   recovery_success: { icon: CheckCircle, color: '#059669', bg: '#ecfdf5', label: 'Healed' },
   recovery_failed: { icon: XCircle, color: '#dc2626', bg: '#fef2f2', label: 'Heal Fail' },
+  rollback_step: { icon: Undo2, color: '#ea580c', bg: '#fff7ed', label: 'Rollback' },
   info: { icon: Info, color: '#6b7280', bg: '#f9fafb', label: 'Info' },
 };
 

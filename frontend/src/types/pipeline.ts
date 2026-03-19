@@ -65,8 +65,10 @@ export type LogType =
   | 'retry'
   | 'recovery_start'
   | 'recovery_plan'
+  | 'recovery_applying'
   | 'recovery_success'
   | 'recovery_failed'
+  | 'rollback_step'
   | 'pipeline_start'
   | 'pipeline_done'
   | 'info';

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -16,7 +16,7 @@ class PipelineRow(Base):
     name = Column(String, nullable=False, default="")
     repo_url = Column(String, nullable=False, default="")
     goal = Column(String, nullable=False, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     work_dir = Column(String, default="")
     # Store full PipelineSpec as JSON (analysis + stages)
     spec_json = Column(Text, nullable=False)

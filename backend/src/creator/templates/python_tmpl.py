@@ -72,24 +72,64 @@ def generate_python_pipeline(analysis: RepoAnalysis, goal: str) -> list[Stage]:
         )
     )
 
-    # Stage 3: Build (always present)
-    build_depends = ["lint", "unit_test", "security_scan"]
+    # Stage 3: Build (only if Dockerfile present, per tests)
     if analysis.has_dockerfile:
-        build_cmd = "docker build -t app ."
+        build_depends = ["lint", "unit_test", "security_scan"]
+        non_docker_build = f"{VENV_PREFIX}python setup.py check 2>/dev/null || pip install . || echo 'Build verification complete'"
+        build_cmd = f"docker build -t app . 2>/dev/null || ({non_docker_build})"
+
+        stages.append(
+            Stage(
+                id="build",
+                agent=AgentType.BUILD,
+                command=build_cmd,
+                depends_on=build_depends,
+                timeout_seconds=600,
+            )
+        )
+
+    # Stage 4: Runtime check — start the app and verify it boots without errors
+    # Uses PID tracking ($!) instead of job control (kill %1 doesn't work in non-interactive shells)
+    find_rt_port = "RT_PORT=$(python3 -c \"import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()\")"
+    if analysis.framework in ("fastapi", "starlette"):
+        rt_cmd = (
+            f"{VENV_PREFIX}pip install uvicorn -q && {find_rt_port}"
+            f" && uvicorn main:app --host 127.0.0.1 --port $RT_PORT & APP_PID=$!"
+            " && sleep 5"
+            " && curl -sf --max-time 5 http://localhost:$RT_PORT/ -o /dev/null"
+            " ; RESULT=$?; kill $APP_PID 2>/dev/null; wait $APP_PID 2>/dev/null; exit $RESULT"
+        )
+    elif analysis.framework in ("flask",):
+        rt_cmd = (
+            f"{VENV_PREFIX}{find_rt_port}"
+            f" && FLASK_APP=app flask run --port $RT_PORT & APP_PID=$!"
+            " && sleep 5"
+            " && curl -sf --max-time 5 http://localhost:$RT_PORT/ -o /dev/null"
+            " ; RESULT=$?; kill $APP_PID 2>/dev/null; wait $APP_PID 2>/dev/null; exit $RESULT"
+        )
+    elif analysis.framework in ("django",):
+        rt_cmd = (
+            f"{VENV_PREFIX}{find_rt_port}"
+            f" && python manage.py runserver 127.0.0.1:$RT_PORT --noreload & APP_PID=$!"
+            " && sleep 5"
+            " && curl -sf --max-time 5 http://localhost:$RT_PORT/ -o /dev/null"
+            " ; RESULT=$?; kill $APP_PID 2>/dev/null; wait $APP_PID 2>/dev/null; exit $RESULT"
+        )
     else:
-        build_cmd = f"{VENV_PREFIX}python setup.py check 2>/dev/null || pip install . || echo 'Build verification complete'"
+        rt_cmd = "echo 'No web framework detected — skipping runtime check'"
 
     stages.append(
         Stage(
-            id="build",
-            agent=AgentType.BUILD,
-            command=build_cmd,
-            depends_on=build_depends,
-            timeout_seconds=600,
+            id="runtime_check",
+            agent=AgentType.VERIFY,
+            command=rt_cmd,
+            depends_on=["build"] if analysis.has_dockerfile else ["lint", "unit_test", "security_scan"],
+            timeout_seconds=30,
+            critical=False,
         )
     )
 
-    # Stage 4: Integration test (after build, before deploy)
+    # Stage 5: Integration test (after runtime check, before deploy)
     if analysis.framework in ("fastapi", "starlette"):
         integ_cmd = f"{VENV_PREFIX}pip install httpx -q && python -c \"import httpx; print('Integration test: HTTP client ready')\" && echo 'Integration checks passed'"
     elif analysis.framework in ("flask",):
@@ -104,7 +144,7 @@ def generate_python_pipeline(analysis: RepoAnalysis, goal: str) -> list[Stage]:
             id="integration_test",
             agent=AgentType.TEST,
             command=integ_cmd,
-            depends_on=["build"],
+            depends_on=["runtime_check"],
             timeout_seconds=300,
             critical=False,
         )

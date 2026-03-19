@@ -12,7 +12,9 @@ from src.models.pipeline import PipelineSpec, RepoAnalysis, Stage
 
 logger = logging.getLogger(__name__)
 
-TEMPLATE_MAP: dict[str, callable] = {
+from typing import Callable
+
+TEMPLATE_MAP: dict[str, Callable] = {
     "javascript": generate_nodejs_pipeline,
     "typescript": generate_nodejs_pipeline,
     "python": generate_python_pipeline,

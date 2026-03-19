@@ -19,8 +19,10 @@ const logTypeColors: Record<string, { color: string; label: string }> = {
   retry: { color: '#f59e0b', label: 'RETRY' },
   recovery_start: { color: '#8b5cf6', label: 'HEALING' },
   recovery_plan: { color: '#8b5cf6', label: 'PLAN' },
+  recovery_applying: { color: '#d97706', label: 'FIXING' },
   recovery_success: { color: '#059669', label: 'HEALED' },
   recovery_failed: { color: '#dc2626', label: 'HEAL FAIL' },
+  rollback_step: { color: '#ea580c', label: 'ROLLBACK' },
   info: { color: '#6b7280', label: 'INFO' },
 };
 

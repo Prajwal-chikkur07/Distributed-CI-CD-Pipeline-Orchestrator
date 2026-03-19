@@ -105,7 +105,41 @@ def generate_nodejs_pipeline(analysis: RepoAnalysis, goal: str) -> list[Stage]:
         )
     )
 
-    # Stage 4: Integration test (after build, before deploy)
+    # Stage 4: Runtime check — start the app and verify it boots without errors
+    # Uses a subshell + PID tracking instead of job control (kill %1 doesn't work in non-interactive shells)
+    if "start" in scripts:
+        rt_start = f"PORT=$RT_PORT {run} start"
+    elif is_nextjs and has_build:
+        rt_start = f"PORT=$RT_PORT npx -y next start"
+    elif has_build:
+        rt_start = f"npx -y serve -s build -l $RT_PORT"
+    else:
+        rt_start = None
+
+    if rt_start:
+        runtime_cmd = (
+            "RT_PORT=$(node -e \"const s=require('net').createServer();"
+            "s.listen(0,()=>{process.stdout.write(String(s.address().port));s.close()})\")"
+            f" && {rt_start} & APP_PID=$!"
+            " && sleep 5"
+            " && curl -sf --max-time 5 http://localhost:$RT_PORT/ -o /dev/null"
+            " ; RESULT=$?; kill $APP_PID 2>/dev/null; wait $APP_PID 2>/dev/null; exit $RESULT"
+        )
+    else:
+        runtime_cmd = "echo 'No start script — skipping runtime check'"
+
+    stages.append(
+        Stage(
+            id="runtime_check",
+            agent=AgentType.VERIFY,
+            command=runtime_cmd,
+            depends_on=["build"],
+            timeout_seconds=30,
+            critical=False,
+        )
+    )
+
+    # Stage 5: Integration test (after build, before deploy)
     has_integ_test = "test:integration" in scripts or "test:e2e" in scripts
     if has_integ_test:
         integ_script = "test:integration" if "test:integration" in scripts else "test:e2e"
@@ -118,13 +152,13 @@ def generate_nodejs_pipeline(analysis: RepoAnalysis, goal: str) -> list[Stage]:
             id="integration_test",
             agent=AgentType.TEST,
             command=integ_cmd,
-            depends_on=["build"],
+            depends_on=["runtime_check"],
             timeout_seconds=300,
             critical=False,
         )
     )
 
-    # Stage 5: Deploy (if goal mentions deployment)
+    # Stage 6: Deploy (if goal mentions deployment)
     deploy_keywords = ["deploy", "release", "publish", "production", "staging"]
     should_deploy = any(kw in goal.lower() for kw in deploy_keywords)
 

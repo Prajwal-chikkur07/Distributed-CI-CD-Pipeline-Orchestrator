@@ -31,6 +31,7 @@ export function useWebSocket(
       const url = createWebSocketUrl(pipelineId!);
       const ws = new WebSocket(url);
       wsRef.current = ws;
+      let isClosing = false;
 
       ws.onopen = () => {
         console.log(`[WS] Connected to ${pipelineId}`);
@@ -53,6 +54,7 @@ export function useWebSocket(
       };
 
       ws.onclose = () => {
+        if (isClosing) return;
         console.log('[WS] Disconnected');
         setIsConnected(false);
         wsRef.current = null;
@@ -60,14 +62,22 @@ export function useWebSocket(
         if (retriesRef.current < MAX_RETRIES) {
           retriesRef.current++;
           console.log(`[WS] Retrying (${retriesRef.current}/${MAX_RETRIES})...`);
-          setTimeout(connect, RETRY_DELAY);
+          setTimeout(() => {
+            if (!isClosing) connect();
+          }, RETRY_DELAY);
         }
+      };
+
+      return () => {
+        isClosing = true;
+        ws.close();
       };
     }
 
-    connect();
+    const cleanup = connect();
 
     return () => {
+      if (cleanup) cleanup();
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;

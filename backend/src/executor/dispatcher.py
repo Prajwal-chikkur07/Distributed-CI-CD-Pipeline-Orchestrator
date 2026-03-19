@@ -67,7 +67,7 @@ def _collect_upstream_context(
 
     predecessors = list(scheduler.graph.predecessors(stage_id))
     for pred_id in predecessors:
-        result = scheduler._results.get(pred_id)
+        result = scheduler.get_result(pred_id)
         if not result:
             continue
 
@@ -315,7 +315,7 @@ async def run_pipeline(
                     })
 
                     # Reset status so _execute_stage can mark_running again
-                    scheduler._statuses[stage_id] = StageStatus.PENDING
+                    scheduler.reset_stage(stage_id)
                     retry_result = await _execute_stage(
                         stage_id, scheduler, agents, working_dir,
                         use_docker, language, command_override=new_command,
@@ -355,7 +355,7 @@ async def run_pipeline(
                 )
                 stage.retry_count -= 1
                 scheduler.mark_complete(stage_id, StageStatus.FAILED, result)
-                scheduler._statuses[stage_id] = StageStatus.PENDING
+                scheduler.reset_stage(stage_id)
                 await _broadcast({
                     "stage_id": stage_id,
                     "status": "running",
@@ -387,7 +387,10 @@ async def run_pipeline(
                     "log_message": f"Recovery plan for '{stage_id}': {plan.strategy.value} — {plan.reason}" + (f" | New command: {plan.modified_command[:80]}" if plan.modified_command else ""),
                 })
 
-                recovery_result = await execute_recovery(plan, stage, scheduler, agents, working_dir)
+                recovery_result = await execute_recovery(
+                    plan, stage, scheduler, agents, working_dir,
+                    use_docker=use_docker, language=language, on_update=_broadcast,
+                )
                 if recovery_result is None:
                     scheduler.mark_complete(stage_id, StageStatus.FAILED, result)
                     scheduler.skip_dependents(stage_id)

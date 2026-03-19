@@ -1,3 +1,4 @@
+from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
@@ -56,7 +57,7 @@ async def save_results(pipeline_id: str, results: dict[str, StageResult]) -> Non
             select(StageResultRow).where(StageResultRow.pipeline_id == pipeline_id)
         )
         for row in old.scalars():
-            await session.delete(row)
+            session.delete(row)
 
         # Insert new results
         for stage_id, result in results.items():
@@ -100,7 +101,7 @@ async def delete_pipeline(pipeline_id: str) -> bool:
         row = result.scalar_one_or_none()
         if not row:
             return False
-        await session.delete(row)
+        session.delete(row)
         await session.commit()
         return True
 

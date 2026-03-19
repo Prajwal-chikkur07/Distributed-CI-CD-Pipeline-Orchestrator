@@ -1,4 +1,6 @@
+from __future__ import annotations
 import logging
+from typing import Optional
 
 import networkx as nx
 
@@ -71,6 +73,11 @@ class DAGScheduler:
         """Mark a stage as currently running."""
         self._statuses[stage_id] = StageStatus.RUNNING
 
+    def reset_stage(self, stage_id: str) -> None:
+        """Reset a stage to PENDING status (e.g. for retry)."""
+        self._statuses[stage_id] = StageStatus.PENDING
+        self._results.pop(stage_id, None)
+
     def is_finished(self) -> bool:
         """Check if all stages are finished (no PENDING or RUNNING remain)."""
         return all(
@@ -88,6 +95,10 @@ class DAGScheduler:
     def get_status(self, stage_id: str) -> StageStatus:
         """Get the current status of a stage."""
         return self._statuses[stage_id]
+
+    def get_result(self, stage_id: str) -> Optional[StageResult]:
+        """Get the result of a completed stage."""
+        return self._results.get(stage_id)
 
     def get_all_results(self) -> dict[str, StageResult]:
         """Return all collected stage results."""

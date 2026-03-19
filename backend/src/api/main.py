@@ -1,7 +1,9 @@
 import logging
+from contextlib import asynccontextmanager
+from typing import Any
 
 import uvicorn
-from fastapi import Body, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -31,9 +33,12 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-async def startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     await init_db()
+    yield
+
+app = FastAPI(title="CI/CD Pipeline Orchestrator", lifespan=lifespan)
 
 
 @app.get("/pipelines")

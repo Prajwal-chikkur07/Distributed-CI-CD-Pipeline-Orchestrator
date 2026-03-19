@@ -41,10 +41,11 @@ async def analyze_repo(repo_url: str, goal: str = "") -> tuple[RepoAnalysis, str
     Returns the analysis and the clone path (caller is responsible
     for cleanup).
     """
+    import asyncio
     tmp_dir = tempfile.mkdtemp(prefix="cicd-analyzer-")
     try:
         logger.info("Cloning %s into %s", repo_url, tmp_dir)
-        git.Repo.clone_from(repo_url, tmp_dir, depth=1)
+        await asyncio.to_thread(git.Repo.clone_from, repo_url, tmp_dir, depth=1)
         logger.info("Clone complete, running analysis")
         analysis = detect_language(tmp_dir)
 
@@ -64,5 +65,5 @@ async def analyze_repo(repo_url: str, goal: str = "") -> tuple[RepoAnalysis, str
         return analysis, tmp_dir
     except git.GitCommandError as e:
         logger.error("Failed to clone repository: %s", e)
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, tmp_dir, ignore_errors=True)
         raise ValueError(f"Failed to clone repository: {e}") from e
